@@ -6,3 +6,7 @@ data = dict(
     datadir='./data/360_v2/truck',
     factor=2,
 )
+
+yolo = dict(
+    target_class_id=7,
+)

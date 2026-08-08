@@ -18,6 +18,7 @@ to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
 @torch.no_grad()
 def mask_to_prompt(predictor, rendered_mask_score, index_matrix, num_prompts = 3):
     '''main function for self prompting'''
+    rendered_mask_score = rendered_mask_score.float()
     h, w, _ = rendered_mask_score.shape
     tmp = rendered_mask_score.view(-1)
     print("tmp min:", tmp.min(), "tmp max:", tmp.max())

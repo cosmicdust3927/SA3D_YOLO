@@ -20,9 +20,9 @@ import dash
 from dash import Dash, Input, Output, dcc, html, State
 from dash.exceptions import PreventUpdate
 from .self_prompting import grounding_dino_prompt
+from model_assets import load_yolo_model
 
 # by seok
-from ultralytics import YOLO
 from torchvision.utils import save_image
 from lib import sam3d
 from . import utils
@@ -33,7 +33,7 @@ import torchvision.transforms as transforms
 from scipy.spatial.transform import Rotation as R
 
 # model_yolo = YOLO('yolov8n.pt')
-model_yolo = YOLO('yolov8x-seg.pt')
+model_yolo = load_yolo_model()
 best_view_idx = None  # 전역 변수로 선언
 
 def compute_pose_distance(pose1, pose2, w=0.5):
@@ -65,15 +65,16 @@ def draw_figure(fig, title, animation_frame=None):
     fig.update_yaxes(showticklabels=False)
     return fig
 
-def find_view_with_max_objects(data_dict, yolo_model):
+def find_view_with_max_objects(data_dict, yolo_model, target_class_id):
     """
     모든 객체가 가장 잘 보이는 뷰를 선택하는 함수
     Args:
         data_dict: 학습 데이터 (images, poses, etc.)
         yolo_model: YOLO 모델 객체
+        target_class_id: 타겟 클래스 ID
     Returns:
-        best_view_idx: 가장 많은 객체가 감지된 뷰의 인덱스
-        max_instances: 해당 뷰에서 감지된 총 객체 수
+        best_view_idx: 가장 많은 객체가 감지된 뷰의 로컬 인덱스
+        max_score: 해당 뷰의 종합 점수
     """
     # max_instances = 0
     # best_view_idx = 0
@@ -95,9 +96,10 @@ def find_view_with_max_objects(data_dict, yolo_model):
 
     max_score = -float('inf')
     best_view_idx = 0
+    train_ids = np.asarray(data_dict['i_train'], dtype=np.int64)
 
-    for idx in range(len(data_dict['i_train'])):
-        img = data_dict['images'][idx].numpy()
+    for local_idx, camera_id in enumerate(train_ids):
+        img = data_dict['images'][camera_id].numpy()
         img = utils.to8b(img)
         h, w, c = img.shape
         
@@ -105,7 +107,7 @@ def find_view_with_max_objects(data_dict, yolo_model):
         results = yolo_model.predict(
             source=img, 
             imgsz=(h, w),  # 원본 해상도 유지
-            classes=7,  # person 클래스만 검출
+            classes=target_class_id,  # 특정 클래스만 검출
             stream=False  # 단일 이미지 처리
         )
         
@@ -118,12 +120,12 @@ def find_view_with_max_objects(data_dict, yolo_model):
         
         # 종합 점수 계산 (신뢰도 70% + 객체 수 30%)
         conf_sum = np.sum(confidences)
-        score = (conf_sum * 0.7) + (num_instances * 0.3)
+        score = (conf_sum / len(confidences) * 0.7) + (num_instances * 0.3) # 평균 confidence로 수정
 
         # 최대 점수 갱신
         if score > max_score:
             max_score = score
-            best_view_idx = idx
+            best_view_idx = local_idx
 
     return best_view_idx, max_score
 
@@ -150,13 +152,15 @@ class Sam3dGUI:
         init_rgb = self.Seg3d.init_model()
 
         # 모든 객체가 잘 보이는 뷰를 선택
-        best_view_idx, max_instances = find_view_with_max_objects(self.Seg3d.data_dict, model_yolo)
+        best_view_idx, max_score = find_view_with_max_objects(self.Seg3d.data_dict, model_yolo, self.Seg3d.target_class_id)
+        best_view_camera_id = int(self.Seg3d.data_dict['i_train'][best_view_idx])
 
-        logging.info(f"Best view with max objects: {best_view_idx} (Instances: {max_instances})")
+        logging.info(f"Best view with max objects: {best_view_idx} (Camera: {best_view_camera_id}, Score: {max_score})")
 
         # 선택된 뷰에서 초기 이미지 설정
-        init_rgb = self.Seg3d.data_dict['images'][best_view_idx, :, :, :].numpy()
+        init_rgb = self.Seg3d.data_dict['images'][best_view_camera_id, :, :, :].numpy()
         init_rgb = utils.to8b(init_rgb)
+        self.Seg3d.predictor.set_image(init_rgb)
 
         self.ctx['cur_img'] = init_rgb
         self.run_app(sam_pred=self.Seg3d.predictor, ctx=self.ctx, init_rgb=init_rgb)
@@ -178,7 +182,7 @@ class Sam3dGUI:
                     )
                 elif points is None:             
                     h, w, c = ctx['cur_img'].shape
-                    results = model_yolo.predict(source=ctx['cur_img'], imgsz=(h,w), classes=7)
+                    results = model_yolo.predict(source=ctx['cur_img'], imgsz=(h,w), classes=self.Seg3d.target_class_id)
                     h2, w2 = results[0].masks.data[0].shape
                     m = torch.zeros([h, w])
                     for j, img in enumerate(results[0].masks.data):
@@ -191,7 +195,6 @@ class Sam3dGUI:
                     m = torch.zeros([h, w])
                     img = results[0].masks.data[idx_select]
                     m = img[(h2-h)//2:(h2+h)//2,:]
-                    self.Seg3d.confidences.append(results[0].boxes.conf[idx_select])
 
                     masks = torch.zeros([c, h, w]).cpu().numpy()
                     masks[0:3,:,:] = m.type(torch.bool).cpu().numpy()
@@ -438,7 +441,11 @@ class Sam3dGUI:
                 logging.debug("Starting training process")
                 # optim in the first view
 
-                all_view_indices = list(range(len(self.Seg3d.data_dict['i_train'])))
+                original_train_ids = np.asarray(
+                    self.Seg3d.data_dict['i_train'],
+                    dtype=np.int64,
+                ).copy()
+                all_view_indices = list(range(len(original_train_ids)))
                 print("Available view indices:", all_view_indices)
                 print("Best view index:", best_view_idx)
 
@@ -458,7 +465,7 @@ class Sam3dGUI:
                 history_window.append(best_view_idx)
 
                 # 포즈 거리 기반 정렬
-                poses = self.Seg3d.data_dict['poses'][self.Seg3d.data_dict['i_train']]
+                poses = self.Seg3d.data_dict['poses'][original_train_ids]
 
                 while available_indices:
                     # 가중치 계산
@@ -480,7 +487,8 @@ class Sam3dGUI:
                     history_window.append(next_idx)
 
                 # 첫 번째 학습을 위한 정렬된 인덱스 저장
-                i_train_sorted_1 = sorted_indices.copy()
+                first_order_local = np.asarray(sorted_indices, dtype=np.int64)
+                i_train_sorted_1 = original_train_ids[first_order_local].tolist()
                 self.Seg3d.data_dict['i_train'] = i_train_sorted_1
 
                 # start_idx = best_view_idx
@@ -523,15 +531,25 @@ class Sam3dGUI:
                 # 첫 번째 학습에서 사용한 인덱스 저장
                 first_train_indices = i_train_sorted_1.copy()
                 
-                # by seok: sort view list according to the confidence value
-                confidences = self.Seg3d.confidences
-                max_conf_idx = confidences.index(max(confidences))
-                sorted_indices = [max_conf_idx]
-                available_indices = list(range(len(confidences)))
-                available_indices.remove(max_conf_idx)
+                # by seok: sort view list according to the matching score
+                matching_score = self.Seg3d.matching_score
+                if not matching_score:
+                    raise RuntimeError("No valid matching scores were recorded during the first pass.")
+
+                best_matching_camera_id = max(matching_score, key=matching_score.get)
+
+                camera_to_first_local = {
+                    int(camera_id): local_idx
+                    for local_idx, camera_id in enumerate(first_train_indices)
+                }
+                best_matching_local_idx = camera_to_first_local[best_matching_camera_id]
+
+                sorted_indices = [best_matching_local_idx]
+                available_indices = list(range(len(first_train_indices)))
+                available_indices.remove(best_matching_local_idx)
 
                 history_window = deque(maxlen=4)  # 최근 4개 뷰 추적
-                history_window.append(max_conf_idx)
+                history_window.append(best_matching_local_idx)
 
                 # by young : sort view list according to the pose distances
                 # 포즈 거리 기반으로 정렬된 순서에 따라 학습 진행
@@ -557,28 +575,49 @@ class Sam3dGUI:
                     history_window.append(next_idx)
 
                 # 두 번째 학습을 위한 정렬된 인덱스
-                i_train_sorted_2 = sorted_indices
+                second_order_local = np.asarray(sorted_indices, dtype=np.int64)
+                i_train_sorted_2 = np.asarray(first_train_indices)[second_order_local].tolist()
 
-                # 직접 인덱스 사용 (매핑 없이)
                 self.Seg3d.data_dict['i_train'] = i_train_sorted_2
 
-                print(f"Selected Instance Confidence List: {self.Seg3d.confidences}")
-                print(f"Sorted Confidence Order: {[self.Seg3d.confidences[i] for i in sorted_indices]}")
-                print(f"Initial view (highest confidence): {max_conf_idx}")
-                print(f"New training order: {sorted_indices}")
+                print(f"Selected Instance Matching Scores: {self.Seg3d.matching_score}")
+                print(f"Sorted Matching Score Order: {[matching_score.get(camera_id) for camera_id in i_train_sorted_2]}")
+                print(f"Initial view (highest matching score): {best_matching_camera_id}")
+                print(f"New training order: {i_train_sorted_2}")
                 
                 # render_poses, HW, Ks 갱신
                 self.Seg3d.update_render_poses()
 
-                img = self.Seg3d.data_dict['images'][i_train_sorted_2[0], :, :, :].numpy()
+                second_seed_camera_id = int(i_train_sorted_2[0])
+                if second_seed_camera_id != best_matching_camera_id:
+                    raise RuntimeError("The second-pass order does not start from the best camera.")
+
+                img = self.Seg3d.data_dict['images'][second_seed_camera_id].numpy()
                 img = utils.to8b(img)
                 h, w, c = img.shape
-                results = model_yolo.predict(source=img, imgsz=(h, w), classes=7)
-                h2, w2 = results[0].masks.data[0].shape
-                m = torch.zeros([h, w])
-                idx_select = self.Seg3d.idx_selected[i_train_sorted_2[0]]
+                results = model_yolo.predict(
+                    source=img,
+                    imgsz=(h, w),
+                    classes=self.Seg3d.target_class_id,
+                )
+                if (
+                    not results
+                    or not results[0].boxes
+                    or len(results[0].boxes) == 0
+                    or results[0].masks is None
+                    or len(results[0].masks.data) == 0
+                ):
+                    raise RuntimeError("No objects were detected in the second-pass seed view.")
+
+                idx_select = self.Seg3d.selected_instance_by_camera.get(
+                    second_seed_camera_id
+                )
+                if idx_select is None or idx_select >= len(results[0].masks.data):
+                    raise RuntimeError("The selected instance is unavailable in the second-pass seed view.")
+
+                h2, w2 = results[0].masks.data[idx_select].shape
                 mask_img = results[0].masks.data[idx_select]
-                m = mask_img[(h2 - h) // 2 : (h2 + h) // 2, :]
+                m = mask_img[(h2 - h) // 2:(h2 + h) // 2, :]
 
                 # 마스크 이미지 저장
                 # save_image(m, f'yolo_0.png')
@@ -681,4 +720,3 @@ if __name__ == '__main__':
     gui.ctx['cur_img'] = image
     gui.ctx['video'] = video
     gui.run_app(sam_pred.predictor, gui.ctx, image)
-
