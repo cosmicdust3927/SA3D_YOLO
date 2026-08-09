@@ -120,3 +120,7 @@ fine_model_and_render.update(dict(
 ))
 
 del deepcopy
+
+yolo = dict(
+    target_class_id=0,
+)
