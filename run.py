@@ -69,6 +69,10 @@ def config_parser():
                         help='freeze rgb grid and mlp')
     parser.add_argument("--stop_at", type=int,
                         help='at what iteration to stop training.')
+
+    # stride option
+    parser.add_argument("--stride", type=int, default=None,
+                        help='camera sampling stride after geometry-based ordering')
     return parser
 
 
@@ -640,6 +644,14 @@ if __name__=='__main__':
     args = parser.parse_args()
     cfg = Config.fromfile(args.config)
 
+    # check stride
+    if args.stride is not None:
+        if args.stride < 1:
+            parser.error(f'--stride must be at least 1')
+
+        cfg.data.train_view_stride = args.stride
+        cfg.expname = f"{cfg.expname}_stride{args.stride}"
+
     # init enviroment
     if torch.cuda.is_available():
         torch.set_default_tensor_type('torch.cuda.FloatTensor')
@@ -743,6 +755,9 @@ if __name__=='__main__':
 
         # render testset and eval
         if args.render_test:
+            if len(data_dict['i_test']) == 0:
+                raise ValueError("--render_test is unavailable because no fixed test views are configured. "
+                                 "Use --render_train or --render_video.")
             testsavedir = os.path.join(cfg.basedir, cfg.expname, f'render_test_{ckpt_name}')
             os.makedirs(testsavedir, exist_ok=True)
             print('All results are dumped into', testsavedir)
@@ -762,10 +777,11 @@ if __name__=='__main__':
             testsavedir = os.path.join(cfg.basedir, cfg.expname, f'render_video_{ckpt_name}')
             os.makedirs(testsavedir, exist_ok=True)
             print('All results are dumped into', testsavedir)
+            reference_camera_id = int(data_dict['i_train'][0])
             rgbs, depths, bgmaps = render_viewpoints(
                     render_poses=data_dict['render_poses'],
-                    HW=data_dict['HW'][data_dict['i_test']][[0]].repeat(len(data_dict['render_poses']), 0),
-                    Ks=data_dict['Ks'][data_dict['i_test']][[0]].repeat(len(data_dict['render_poses']), 0),
+                    HW=data_dict['HW'][[reference_camera_id]].repeat(len(data_dict['render_poses']), 0),
+                    Ks=data_dict['Ks'][[reference_camera_id]].repeat(len(data_dict['render_poses']), 0),
                     cfg=cfg,
                     render_factor=args.render_video_factor,
                     render_video_flipy=args.render_video_flipy,

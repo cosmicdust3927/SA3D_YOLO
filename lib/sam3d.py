@@ -703,8 +703,9 @@ def fetch_seg_poses(seg_poses_type, data_dict):
         # Ks = np.concatenate((Ks,Ks),axis=0)        
     elif seg_poses_type == 'video':
         render_poses=data_dict['render_poses']
-        HW=data_dict['HW'][data_dict['i_test']][[0]].repeat(len(render_poses), 0)
-        Ks=data_dict['Ks'][data_dict['i_test']][[0]].repeat(len(render_poses), 0)
+        reference_camera_id = int(data_dict['i_train'][0])
+        HW=data_dict['HW'][[reference_camera_id]].repeat(len(render_poses), 0)
+        Ks=data_dict['Ks'][[reference_camera_id]].repeat(len(render_poses), 0)
     else:
         raise NotImplementedError
 
