@@ -90,20 +90,25 @@ wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8x-seg.
 
 ## 🎯 사용법
 
+'N'에는 사용할 카메라 stride 값을 입력합니다.
+- 예: '1', '2', '4', '8'
+
 ### 1. NeRF 모델 학습
 ```bash
-python run.py --config=configs/nerf_unbounded/Set1.py --stop_at=20000 --render_video --i_weights=10000
+python run.py --config=configs/nerf_unbounded/Set1.py --stop_at=20000 --render_video --i_weights=10000 --stride=N
 ```
 
 ### 2. 3D 세그멘테이션 실행 (GUI)
 ```bash
-python run_seg_gui.py --config=configs/nerf_unbounded/seg_Set1.py --segment --sp_name=_gui --num_prompts=20 --render_opt=train --save_ckpt
+python run_seg_gui.py --config=configs/nerf_unbounded/seg_Set1.py --segment --sp_name=_gui --num_prompts=20 --render_opt=train --save_ckpt --stride=N
 ```
 
 ### 3. 결과 렌더링
 ```bash
-python run_seg_gui.py --config=configs/nerf_unbounded/seg_Set1.py --segment --sp_name=_gui --num_prompts=20 --render_only --render_opt=video --dump_images --seg_type seg_img seg_density
+python run_seg_gui.py --config=configs/nerf_unbounded/seg_Set1.py --segment --sp_name=_gui --num_prompts=20 --render_only --render_opt=video --dump_images --seg_type seg_img seg_density --stride=N
 ```
+
+> NeRF 학습, 3D 세그멘테이션, 결과 렌더링에는 반드시 동일한 `--stride` 값을 사용해야 합니다.
 
 ## 🔧 설정 파일
 
