@@ -53,7 +53,7 @@ def load_everything(args, cfg):
     # remove useless field
     kept_keys = {
             'hwf', 'HW', 'Ks', 'near', 'far', 'near_clip',
-            'i_train', 'i_val', 'i_test', 'irregular_shape',
+            'i_train', 'i_val', 'i_test', 'i_sparse_unseen', 'irregular_shape',
             'poses', 'render_poses', 'images'}
     for k in list(data_dict.keys()):
         if k not in kept_keys:
@@ -382,4 +382,3 @@ def get_rays_of_a_view(H, W, K, c2w, ndc, inverse_y, flip_x, flip_y, mode='cente
 ''' interactive mode TODO'''
 def fetch_user_define_points():
     pass
-

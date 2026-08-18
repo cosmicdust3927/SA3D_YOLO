@@ -100,7 +100,8 @@ def config_parser():
     parser.add_argument("--save_ckpt", action='store_true',
                         help='save segmentation ckpt')
     parser.add_argument("--mobile_sam", action='store_true', help='Replace the original SAM encoder with MobileSAM to accelerate segmentation')
+
+    # stride option
+    parser.add_argument("--stride", type=int, default=None,
+                        help='camera sampling stride after geometry-based ordering')
     return parser
-
-
-

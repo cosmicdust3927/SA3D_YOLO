@@ -87,6 +87,14 @@ if __name__=='__main__':
     args = parser.parse_args()
     cfg = Config.fromfile(args.config)
 
+    # check stride
+    if args.stride is not None:
+        if args.stride < 1:
+            parser.error(f'--stride must be at least 1')
+
+        cfg.data.train_view_stride = args.stride
+        cfg.expname = f"{cfg.expname}_stride{args.stride}"
+
     # init enviroment
     if torch.cuda.is_available():
         torch.set_default_tensor_type('torch.cuda.FloatTensor')
