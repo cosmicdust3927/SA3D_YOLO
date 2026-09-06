@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "scenes": {
+    "Set1": {
+      "dataset_dir": "data/360_v2/Set1",
+      "nerf_config": "configs/nerf_unbounded/Set1.py",
+      "seg_config": "configs/nerf_unbounded/seg_Set1.py",
+      "gt_instances_dir": "data/360_v2/Set1/gt_instances"
+    },
+    "Set2": {
+      "dataset_dir": "data/360_v2/Set2",
+      "nerf_config": "configs/nerf_unbounded/Set2.py",
+      "seg_config": "configs/nerf_unbounded/seg_Set2.py",
+      "gt_instances_dir": "data/360_v2/Set2/gt_instances"
+    },
+    "Set10": {
+      "dataset_dir": "data/360_v2/Set10",
+      "nerf_config": "configs/nerf_unbounded/Set10.py",
+      "seg_config": "configs/nerf_unbounded/seg_Set10.py",
+      "gt_instances_dir": "data/360_v2/Set10/gt_instances"
+    },
+    "Set11": {
+      "dataset_dir": "data/360_v2/Set11",
+      "nerf_config": "configs/nerf_unbounded/Set11.py",
+      "seg_config": "configs/nerf_unbounded/seg_Set11.py",
+      "gt_instances_dir": "data/360_v2/Set11/gt_instances"
+    }
+  },
+  "test_camera_ids": [1, 5, 9, 13, 21, 25, 29, 33],
+  "candidate_camera_ids": [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16, 22, 23, 24, 26, 27, 28, 30, 31, 32, 34, 35, 36],
+  "budgets": [4, 8, 16],
+  "random_selection_seeds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  "training_seed": 777,
+  "camera_id_pattern": "(?P<id>\\d+)(?!.*\\d)",
+  "proposed": {
+    "alpha": 1.0,
+    "beta": 0.5,
+    "initial": "mean"
+  },
+  "nerf": {
+    "common_stop_at": 20000,
+    "end_to_end_stop_at": 20000,
+    "checkpoint_interval": 10000
+  },
+  "segmentation": {
+    "target_class_id": 0,
+    "yolo_confidence": 0.25,
+    "association_iou_weight": 0.6,
+    "mask_threshold": 0.0,
+    "failure_iou_threshold": 0.5,
+    "boundary_tolerance_pixels": 2
+  }
+}
+

@@ -1,3 +1,6 @@
+import os
+import re
+
 import numpy as np
 
 from .load_llff import load_llff_data
@@ -16,6 +19,38 @@ from .load_lerf import load_lerf_data
 # alpha=1.0 : 카메라가 1 rad 회전시 시점이 1 m 이동했을 때
 _GEOMETRY_POSE_ALPHA = 1.0
 _GEOMETRY_HISTORY_BETA = 0.5
+
+
+def _camera_ids_from_llff_images(datadir, pattern=r'(?P<id>\d+)(?!.*\d)'):
+    """Return camera IDs in the exact lexicographic order used by LLFF."""
+    image_dir = os.path.join(datadir, 'images')
+    filenames = sorted(
+        name for name in os.listdir(image_dir)
+        if name.lower().endswith(('.jpg', '.jpeg', '.png'))
+    )
+    camera_ids = []
+    for filename in filenames:
+        match = re.search(pattern, os.path.splitext(filename)[0])
+        if match is None:
+            raise ValueError(
+                f"Could not parse camera ID from {filename!r} using {pattern!r}"
+            )
+        value = match.groupdict().get('id') or match.group(0)
+        camera_ids.append(int(value))
+    if len(set(camera_ids)) != len(camera_ids):
+        raise ValueError('Parsed LLFF camera IDs must be unique')
+    return np.asarray(camera_ids, dtype=np.int64)
+
+
+def _indices_from_camera_ids(camera_ids, requested_ids, split_name):
+    lookup = {int(camera_id): index for index, camera_id in enumerate(camera_ids)}
+    requested_ids = [int(camera_id) for camera_id in requested_ids]
+    if len(requested_ids) != len(set(requested_ids)):
+        raise ValueError(f'{split_name} camera IDs contain duplicates')
+    missing = sorted(set(requested_ids) - set(lookup))
+    if missing:
+        raise ValueError(f'{split_name} contains unknown camera IDs: {missing}')
+    return np.asarray([lookup[camera_id] for camera_id in requested_ids], dtype=np.int64)
 
 # 카메라 거리가 같으면 카메라 ID가 작은 것을 우선으로 선택
 def _stable_argmin(values, candidate_indices, camera_ids):
@@ -136,6 +171,7 @@ def load_data(args):
     K, depths = None, None
     near_clip = None
     i_sparse_unseen = np.array([], dtype=np.int64)  # 학습 제외 view 저장 배열; 결과 확인용
+    camera_ids = None
 
     if args.dataset_type == 'llff':
         images, depths, poses, bds, render_poses, i_test = load_llff_data(
@@ -160,34 +196,59 @@ def load_data(args):
         # i_test = []
         i_val = i_test
 
-        # 정렬 후 stride 적용
+        camera_ids = _camera_ids_from_llff_images(
+            args.datadir,
+            getattr(args, 'camera_id_pattern', r'(?P<id>\d+)(?!.*\d)'),
+        )
+        if len(camera_ids) != len(images):
+            raise ValueError(
+                f'Parsed {len(camera_ids)} camera IDs for {len(images)} LLFF images'
+            )
+
+        # Explicit camera IDs take precedence. This is the strict ICRA path:
+        # the ordered training list and held-out test list are never inferred.
         all_view_indices = np.arange(int(images.shape[0]), dtype=np.int64)
-        configured_stride = getattr(args, 'train_view_stride', None)
-        if configured_stride is None:
-            i_train = all_view_indices
+        explicit_train_ids = getattr(args, 'train_camera_ids', None)
+        explicit_test_ids = getattr(args, 'test_camera_ids', None)
+        if explicit_train_ids is not None or explicit_test_ids is not None:
+            if explicit_train_ids is None or explicit_test_ids is None:
+                raise ValueError(
+                    'train_camera_ids and test_camera_ids must be configured together'
+                )
+            i_train = _indices_from_camera_ids(
+                camera_ids, explicit_train_ids, 'train split'
+            )
+            i_test = _indices_from_camera_ids(
+                camera_ids, explicit_test_ids, 'test split'
+            )
+            overlap = np.intersect1d(i_train, i_test)
+            if len(overlap):
+                raise ValueError(
+                    f'train/test split overlap at camera IDs {camera_ids[overlap].tolist()}'
+                )
+            i_val = i_test.copy()
+            i_sparse_unseen = np.setdiff1d(all_view_indices, i_train)
         else:
-            if isinstance(configured_stride, bool) or not isinstance(
-                    configured_stride, (int, np.integer)):
-                raise ValueError("train_view_stride must be a positive integer")
-            train_view_stride = int(configured_stride)
-            if train_view_stride < 1:
-                raise ValueError("train_view_stride must be at least 1")
+            configured_stride = getattr(args, 'train_view_stride', None)
+            if configured_stride is None:
+                i_train = all_view_indices
+            else:
+                if isinstance(configured_stride, bool) or not isinstance(
+                        configured_stride, (int, np.integer)):
+                    raise ValueError("train_view_stride must be a positive integer")
+                train_view_stride = int(configured_stride)
+                if train_view_stride < 1:
+                    raise ValueError("train_view_stride must be at least 1")
 
-            train_candidate_indices = all_view_indices
+                train_candidate_indices = np.setdiff1d(all_view_indices, i_test)
 
-            geometry_ordered_ids = _build_geometry_order(   # 카메라 pose 기반 정렬
-                poses[train_candidate_indices],
-                train_candidate_indices,
-            )
+                geometry_ordered_ids = _build_geometry_order(
+                    poses[train_candidate_indices],
+                    train_candidate_indices,
+                )
 
-            i_train = geometry_ordered_ids[::train_view_stride].copy()  # stride 적용
-            i_sparse_unseen = np.setdiff1d(     # 학습 제외 view 저장
-                train_candidate_indices,
-                i_train,
-            )
-
-            i_test = np.array([], dtype=np.int64)
-            i_val = np.array([], dtype=np.int64)
+                i_train = geometry_ordered_ids[::train_view_stride].copy()
+                i_sparse_unseen = np.setdiff1d(train_candidate_indices, i_train)
         # i_train = np.array([i for i in np.arange(int(images.shape[0])) if
         #                 (i not in i_test and i not in i_val)])
 
@@ -365,6 +426,7 @@ def load_data(args):
         near=near, far=far, near_clip=near_clip,
         i_train=i_train, i_val=i_val, i_test=i_test,
         i_sparse_unseen=i_sparse_unseen,
+        camera_ids=camera_ids,
         poses=poses, render_poses=render_poses,
         images=images, depths=depths,
         irregular_shape=irregular_shape

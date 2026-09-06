@@ -175,6 +175,10 @@ def seed_everything(args):
     (some pytorch operation is non-deterministic like the backprop of grid_samples)
     '''
     torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
     np.random.seed(args.seed)
     random.seed(args.seed)
 
@@ -188,7 +192,7 @@ def load_everything(args, cfg):
     kept_keys = {
             'hwf', 'HW', 'Ks', 'near', 'far', 'near_clip',
             'i_train', 'i_val', 'i_test', 'irregular_shape',
-            'poses', 'render_poses', 'images'}
+            'poses', 'render_poses', 'images', 'camera_ids'}
     for k in list(data_dict.keys()):
         if k not in kept_keys:
             data_dict.pop(k)
@@ -796,4 +800,3 @@ if __name__=='__main__':
             imageio.mimwrite(os.path.join(testsavedir, 'video.depth.mp4'), utils.to8b(depth_vis), fps=30, quality=8)
 
         print('Done')
-
