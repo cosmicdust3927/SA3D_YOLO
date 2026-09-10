@@ -270,7 +270,7 @@ class Sam3D(ABC):
             #----------------------------------------------
 
             yolo_m = results[0].masks.data[best_idx][(h2-h)//2:(h2+h)//2,:] # max iou -> best idx 로 수정
-            save_image(yolo_m, f'yolo_{idx}.png')
+            # save_image(yolo_m.float(), f'yolo_{idx}.png')
 
             # save matching score
             if self.vsgflag == False:
