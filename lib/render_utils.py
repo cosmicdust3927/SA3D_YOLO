@@ -129,8 +129,16 @@ def fetch_render_params(render_type, data_dict):
         gt_imgs=[data_dict['images'][i].cpu().numpy() for i in data_dict['i_test']]
     elif render_type == 'video':
         render_poses=data_dict['render_poses']
-        HW=data_dict['HW'][data_dict['i_test']][[0]].repeat(len(data_dict['render_poses']), 0)
-        Ks=data_dict['Ks'][data_dict['i_test']][[0]].repeat(len(data_dict['render_poses']), 0)
+        if len(data_dict['i_train']) == 0:
+            raise ValueError(
+                'Video rendering requires at least one training view.'
+            )
+
+        reference_camera_id = int(data_dict['i_train'][0])
+        HW=data_dict['HW'][[reference_camera_id]].repeat(
+            len(data_dict['render_poses']), 0)
+        Ks=data_dict['Ks'][[reference_camera_id]].repeat(
+            len(data_dict['render_poses']), 0)
         gt_imgs=None
     else:
         raise NotImplementedError
